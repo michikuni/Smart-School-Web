@@ -1,1 +1,1 @@
-# Web_flask_embedded
+# smart_school_web
