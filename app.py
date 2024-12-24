@@ -12,7 +12,7 @@ from flask_mqtt import logger
 app = Flask(__name__)
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.2.114"
+MQTT_BROKER = "192.168.22.175"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -158,7 +158,7 @@ def update_data(path, update_values):
     except Exception as e:
         print(f"Error: {str(e)}")
         return {"error": str(e)}, 500
-    
+
 def get_data_by_id(path, cardId):
     try:
         if not cardId:
@@ -173,7 +173,7 @@ def get_data_by_id(path, cardId):
         return results
     except Exception as e:
         return {"error": str(e)}, 500
-    
+
 def fetch_data_firebase(student_id):
     try:
         ref = db.reference('recognized_faces')
@@ -187,7 +187,6 @@ def fetch_all_data():
     try:
         ref = db.reference('students_attendance')
         all_student_data = ref.get()
-        print(all_student_data)
     except Exception as e:
         return {"error": str(e)}, 500
 
@@ -213,10 +212,43 @@ def start_mqtt():
         print(f"Initial connection failed: {e}")
 
     mqtt_client.loop_start()  # Dùng loop_start() để MQTT chạy trong nền
-
+def fetch_data_by_date(date):
+    try:
+        # Tham chiếu đến ngày cụ thể
+        ref = db.reference(f'students_attendance/{date}')
+        data = ref.get()
+        # print(data)
+        # print(date)
+        return data
+    except Exception as e:
+        return {"error": str(e)}, 500
 @app.route('/')
 def index():
-    return render_template("index.html", students=all_student_data, student_id=student_id)
+    return render_template("index.html")
+@app.route('/submit_date', methods=['POST'])
+def submit_date():
+    selected_date = request.form['date']
+    try:
+        # Chuyển đổi ngày sang định dạng ngày/tháng/năm
+        formatted_date = datetime.strptime(selected_date, '%Y-%m-%d').strftime('%d-%m-%Y')
+        attendance_data = fetch_data_by_date(formatted_date)
+        return jsonify({"date": formatted_date, "attendance": attendance_data})
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
+@app.route('/checkout_all', methods=['POST'])
+def checkout_all():
+    checkout_data = request.get_json()
+    checkout_date = checkout_data.get('dateCheckout')
+    if not checkout_date:
+        return jsonify ({'message': 'No date provided'}), 400
+    formatted_date_checkout = datetime.strptime(checkout_date, '%Y-%m-%d').strftime('%d-%m-%Y')
+    print(f'Checkout date: {formatted_date_checkout}')
+    ref = db.reference(f'students_attendance/{formatted_date_checkout}')
+    data_checkout = ref.get()
+    for key, value in data_checkout.items():
+        if 'checkin' in value and value['checkin']:
+            ref.child(key).update({'state':'1'})
+    print(data_checkout)
 
 if __name__ == "__main__":
     # Khởi động MQTT client trong luồng riêng
@@ -236,4 +268,4 @@ if __name__ == "__main__":
 
 
     # Chạy Flask server
-    app.run(host='127.0.0.1', port=5000)
+    app.run(host='127.0.0.1', port=5010)
