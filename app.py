@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request, jsonify
+import secrets
+
+from flask import Flask, render_template, request, jsonify, redirect, session, url_for, make_response
 import threading
 import paho.mqtt.client as mqtt
 import time
@@ -10,7 +12,7 @@ from datetime import datetime
 from flask_mqtt import logger
 
 app = Flask(__name__)
-
+app.secret_key = secrets.token_hex((24))
 # Cấu hình MQTT
 MQTT_BROKER = "192.168.22.175"
 MQTT_PORT = 1883
@@ -224,7 +226,38 @@ def fetch_data_by_date(date):
         return {"error": str(e)}, 500
 @app.route('/')
 def index():
-    return render_template("index.html")
+    return render_template("login.html")
+@app.route('/login', methods=['POST'])
+def login():
+    email = request.form.get("email")
+    password = request.form.get("password")
+    try:
+        admins_ref = db.reference('admin')
+        admins = admins_ref.get()  # Lấy toàn bộ dữ liệu admin
+
+        # So sánh email và password
+        for admin_id, admin_data in admins.items():
+            if admin_data['email'] == email and admin_data['password'] == password:
+                session['user'] = email
+                return redirect("/home_page")
+        return "Invalid email or password", 401
+    except Exception as e:
+        return f"Error: {str(e)}", 400
+
+@app.route('/home_page')
+def home_page():
+    if 'user' not in session:
+        return redirect(url_for('index'))
+    response = make_response(render_template("index.html", user=session['user']))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect(url_for('index'))
 @app.route('/submit_date', methods=['POST'])
 def submit_date():
     selected_date = request.form['date']
@@ -268,4 +301,4 @@ if __name__ == "__main__":
 
 
     # Chạy Flask server
-    app.run(host='127.0.0.1', port=5010)
+    app.run(host='127.0.0.1', port=5000 )
