@@ -14,7 +14,7 @@ from flask_mqtt import logger
 app = Flask(__name__)
 app.secret_key = secrets.token_hex((24))
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.175"
+MQTT_BROKER = "192.168.22.76"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -81,66 +81,38 @@ def on_message(client, userdata, msg):
         print(f"Received message: {msg.topic} -> {RFID}")
         student_from_db = get_data_by_id('students', RFID)
         if student_from_db:
-            print(student_from_db)
-            student_data = fetch_data_firebase(student_from_db['student_id'])
+            checking_date = datetime.now().strftime('%d-%m-%Y')
+            student_data = fetch_data_firebase(checking_date, student_from_db['student_id'])
         compare_data()
 
 def compare_data():
     if student_from_db and student_data:
         # print(student_data['state'])
-        if student_data['state'] == 0:
+        if student_data['state'] != "1":
             print("check in")
-            check_in_date = student_data['date']
-            check_in_time = student_data['time']
-            students_attendance_add = {
-                "checkin": check_in_time,
-                "checkout": None,
-                "date": check_in_date,
-                "state": 1,
-                "student_name": student_from_db['student_name']
-            }
-            students_face_update = {
-                "date": check_in_date,
-                "state": 1,
-                "student_name": student_from_db['student_name'],
-                "time": check_in_time
-            }
-            face_path = "recognized_faces/" + student_from_db['student_id']
-            attendance_path = 'students_attendance/' + student_from_db['student_id']
-            update_data(attendance_path, students_attendance_add)
-            update_data(face_path, students_face_update)
+
+            ref_attendance = db.reference(f"students_attendance/{student_data['date']}".strip())
+            data_attendance = ref_attendance.child(f"{student_from_db['student_id']}".strip())
+            data_attendance.update({'state':'1'})
+
+            ref_recog = db.reference(f"recognized_faces/{student_data['date']}".strip())
+            data_recog = ref_recog.child(f"{student_from_db['student_id']}".strip())
+            data_recog.update({'state':'1'})
             message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkin"
             mqtt_client.publish(MQTT_SUB, message)
+            print(message)
         else:
             print("check out")
-            current_date_time = datetime.now()
-            check_in_time = datetime.strptime(student_data['time'], "%H:%M:%S").time()
-            check_in_date = datetime.strptime(student_data['date'], "%d-%m-%Y").date()
-            check_in_date_time = datetime.combine(check_in_date, check_in_time)
-            isSameDay = current_date_time.date() == check_in_date
-            isFinishSession = (current_date_time - check_in_date_time).total_seconds() > session_time * 60
 
-            if isSameDay and isFinishSession:
-                students_attendance_update = {
-                    "checkin": check_in_time.strftime("%H:%M:%S"),
-                    "checkout": current_date_time.time().strftime("%H:%M:%S"),
-                    "date": check_in_date.strftime("%d-%m-%Y"),
-                    "state": 0,
-                    "student_name": student_from_db['student_name']
-                }
-                students_face_update = {
-                    "date": check_in_date.strftime("%d-%m-%Y"),
-                    "state": 0,
-                    "student_name": student_from_db['student_name'],
-                    "time": check_in_time.strftime("%H:%M:%S")
-                }
-                face_path = "recognized_faces/" + student_from_db['student_id']
-                attendance_path = 'students_attendance' + "/" + student_from_db['student_id']
-                update_data(attendance_path, students_attendance_update)
-                update_data(face_path, students_face_update)
-                print("check out successful")
-                message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkout"
-                mqtt_client.publish(MQTT_SUB, message)
+            checkout_time = datetime.now().strftime("%H:%M:%S")
+            ref_attendance = db.reference(f"students_attendance/{student_data['date']}".strip())
+            data_attendance = ref_attendance.child(f"{student_from_db['student_id']}".strip())
+            data_attendance.update({'checkout': f'{checkout_time}'})
+
+            message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkout"
+            mqtt_client.publish(MQTT_SUB, message)
+            current_date_time = datetime.now()
+
     else:
         mqtt_client.publish(MQTT_SUB, "0_Unknown")
 
@@ -167,7 +139,7 @@ def get_data_by_id(path, cardId):
             raise ValueError("Missing cardId.")
 
         # Truy vấn Firebase Realtime Database
-        ref = db.reference(f"{path}/{cardId}")  # Đường dẫn tới node "users"
+        ref = db.reference((f"{path}/{cardId}").strip())  # Đường dẫn tới node "users"
         results = ref.get()  # Lọc theo điều kiện
 
         if not results:
@@ -176,9 +148,9 @@ def get_data_by_id(path, cardId):
     except Exception as e:
         return {"error": str(e)}, 500
 
-def fetch_data_firebase(student_id):
+def fetch_data_firebase(checking_date, student_id):
     try:
-        ref = db.reference('recognized_faces')
+        ref = db.reference(f'recognized_faces/{checking_date}'.strip())
         return ref.child(student_id).get()
     except Exception as e:
         return {"error": str(e)}, 500
@@ -275,12 +247,14 @@ def checkout_all():
     if not checkout_date:
         return jsonify ({'message': 'No date provided'}), 400
     formatted_date_checkout = datetime.strptime(checkout_date, '%Y-%m-%d').strftime('%d-%m-%Y')
+    checkout_time = datetime.now().strftime('%H:%M:%S')
     print(f'Checkout date: {formatted_date_checkout}')
     ref = db.reference(f'students_attendance/{formatted_date_checkout}')
     data_checkout = ref.get()
     for key, value in data_checkout.items():
         if 'checkin' in value and value['checkin']:
-            ref.child(key).update({'state':'1'})
+            ref.child(key).update({'state':'1', 'checkout':f'{checkout_time}'})
+
     print(data_checkout)
 
 if __name__ == "__main__":
@@ -301,4 +275,4 @@ if __name__ == "__main__":
 
 
     # Chạy Flask server
-    app.run(host='127.0.0.1', port=5000 )
+    app.run(host='127.0.0.1', port=5003 )

@@ -26,6 +26,36 @@ document.getElementById('date-form').addEventListener('submit', async function (
     }
 });
 
+document.getElementById('date').addEventListener('input', function () {
+    const dateInput = document.getElementById('date').value;
+    const checkoutButton = document.getElementById('checkout-all');
+
+    if (!dateInput) {
+        checkoutButton.disabled = true; // Vô hiệu hóa nút nếu không có ngày
+        checkoutButton.style.backgroundColor = 'gray'; // Đổi màu nút
+        return;
+    }
+
+    const selectedDate = new Date(dateInput);
+    const currentDate = new Date();
+
+    // Đặt giờ phút giây của ngày hiện tại về 0 để so sánh chỉ ngày
+    currentDate.setHours(0, 0, 0, 0);
+    selectedDate.setHours(0, 0, 0, 0);
+
+    const differenceInDays = (selectedDate - currentDate) / (1000 * 60 * 60 * 24);
+
+    if (differenceInDays > 1 || differenceInDays < 0) {
+        // Nếu ngày được chọn vượt quá 1 ngày hoặc là ngày quá khứ
+        checkoutButton.disabled = true;
+        checkoutButton.style.backgroundColor = 'gray';
+    } else {
+        // Ngày hợp lệ trong khoảng 0-1 ngày
+        checkoutButton.disabled = false;
+        checkoutButton.style.backgroundColor = ''; // Khôi phục màu gốc
+    }
+});
+
 document.getElementById('checkout-all').addEventListener('click', async function () {
     const dateInputCheckout = document.getElementById('date').value;
 
@@ -51,6 +81,7 @@ document.getElementById('checkout-all').addEventListener('click', async function
         console.error('Error:', error);
     }
 });
+
 
 function displayResult(data) {
     if (!data || !data.attendance || Object.keys(data.attendance).length === 0) {
