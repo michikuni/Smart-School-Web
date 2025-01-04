@@ -1,5 +1,8 @@
+// Khởi tạo kết nối Socket.IO
+const socket = io();
+
 document.getElementById('date-form').addEventListener('submit', async function (e) {
-    e.preventDefault(); // Ngăn chặn tải lại trang
+    e.preventDefault();
     const dateInput = document.getElementById('date').value;
 
     if (!dateInput || isNaN(new Date(dateInput).getTime())) {
@@ -7,22 +10,49 @@ document.getElementById('date-form').addEventListener('submit', async function (
         return;
     }
 
-    try {
-        const response = await fetch('/submit_date', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ date: dateInput })
-        });
+    await fetchAndUpdateData(dateInput);
+});
 
-        if (!response.ok) {
-            throw new Error('Failed to fetch data');
+// Lắng nghe sự kiện cập nhật từ database
+socket.on('database_update', function(data) {
+    const dateInput = document.getElementById('date').value;
+    if (dateInput) {
+        const formattedDate = new Date(dateInput).toLocaleDateString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        }).split('/').join('-');
+        
+        if (data.path.includes(formattedDate)) {
+            fetchAndUpdateData(dateInput);
         }
+    }
+});
 
-        const data = await response.json();
-        displayResult(data);
-    } catch (error) {
-        console.error('Error:', error);
-        document.getElementById('result').innerHTML = '<p class="text-danger">Error loading data.</p>';
+// Lắng nghe sự kiện cập nhật dữ liệu mới
+socket.on('data_update', function(data) {
+    const dateInput = document.getElementById('date').value;
+    if (dateInput) {
+        const formattedDate = new Date(dateInput).toLocaleDateString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        }).split('/').join('-');
+        
+        if (data.date === formattedDate) {
+            fetchAndUpdateData(dateInput);
+        }
+    }
+});
+
+// Lắng nghe sự kiện checkout all
+socket.on('checkout_update', function(data) {
+    if (data.success) {
+        alert('All students have been checked out successfully');
+        const dateInput = document.getElementById('date').value;
+        if (dateInput) {
+            fetchAndUpdateData(dateInput);
+        }
     }
 });
 
@@ -31,28 +61,25 @@ document.getElementById('date').addEventListener('input', function () {
     const checkoutButton = document.getElementById('checkout-all');
 
     if (!dateInput) {
-        checkoutButton.disabled = true; // Vô hiệu hóa nút nếu không có ngày
-        checkoutButton.style.backgroundColor = 'gray'; // Đổi màu nút
+        checkoutButton.disabled = true;
+        checkoutButton.style.backgroundColor = 'gray';
         return;
     }
 
     const selectedDate = new Date(dateInput);
     const currentDate = new Date();
 
-    // Đặt giờ phút giây của ngày hiện tại về 0 để so sánh chỉ ngày
     currentDate.setHours(0, 0, 0, 0);
     selectedDate.setHours(0, 0, 0, 0);
 
     const differenceInDays = (selectedDate - currentDate) / (1000 * 60 * 60 * 24);
 
     if (differenceInDays > 1 || differenceInDays < 0) {
-        // Nếu ngày được chọn vượt quá 1 ngày hoặc là ngày quá khứ
         checkoutButton.disabled = true;
         checkoutButton.style.backgroundColor = 'gray';
     } else {
-        // Ngày hợp lệ trong khoảng 0-1 ngày
         checkoutButton.disabled = false;
-        checkoutButton.style.backgroundColor = ''; // Khôi phục màu gốc
+        checkoutButton.style.backgroundColor = '';
     }
 });
 
@@ -76,12 +103,32 @@ document.getElementById('checkout-all').addEventListener('click', async function
         }
 
         const result = await response.json();
-        alert(result.message || 'Checking out all successfully');
+        alert(result.message);
     } catch (error) {
         console.error('Error:', error);
+        alert('Error processing checkout request');
     }
 });
 
+async function fetchAndUpdateData(date) {
+    try {
+        const response = await fetch('/submit_date', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ date: date })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch data');
+        }
+
+        const data = await response.json();
+        displayResult(data);
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('result').innerHTML = '<p class="text-danger">Error loading data.</p>';
+    }
+}
 
 function displayResult(data) {
     if (!data || !data.attendance || Object.keys(data.attendance).length === 0) {

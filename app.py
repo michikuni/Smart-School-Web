@@ -1,5 +1,5 @@
 import secrets
-
+from flask_socketio import SocketIO, emit
 from flask import Flask, render_template, request, jsonify, redirect, session, url_for, make_response
 import threading
 import paho.mqtt.client as mqtt
@@ -13,6 +13,8 @@ from flask_mqtt import logger
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex((24))
+socketio = SocketIO(app, cors_allowed_origins="*")
+
 # Cấu hình MQTT
 MQTT_BROKER = "192.168.22.76"
 MQTT_PORT = 1883
@@ -26,20 +28,33 @@ ping_time = {"latency": "Calculating..."}
 
 # MQTT Client
 mqtt_client = mqtt.Client()
-ping_sent_time = None  # Lưu thời gian gửi tin nhắn ping
+ping_sent_time = None
 RFID = ""
 session_time = 1
 student_data = ""
 student_from_db = ""
 student_id = []
 
-#Cấu hình firebase admin SDK
+# Cấu hình firebase admin SDK
 cred = credentials.Certificate('firebase-sdk.json')
-firebase_admin.initialize_app(cred,{
+firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://smart-school-firebase-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 
-# Hàm kiểm tra và kết nối lại nếu mất kết nối
+
+def start_firebase_listener():
+    def stream_handler(event):
+        """Xử lý khi có thay đổi trong database"""
+        if event.data:
+            socketio.emit('database_update', {
+                'path': event.path,
+                'data': event.data
+            })
+
+    ref = db.reference('students_attendance')
+    ref.listen(stream_handler)
+
+
 def ensure_mqtt_connection():
     while True:
         if not mqtt_client.is_connected():
@@ -49,40 +64,46 @@ def ensure_mqtt_connection():
                 print("Reconnected successfully!")
             except Exception as e:
                 print(f"Reconnection failed: {e}")
-        time.sleep(5)  # Kiểm tra trạng thái kết nối mỗi 5 giây
+        time.sleep(5)
 
 
-# Xử lý khi kết nối thành công đến MQTT broker
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print(f"Connected to MQTT Broker with result code {rc}")
         client.subscribe(MQTT_TOPIC)
-        client.subscribe(PING_TOPIC)  # Đăng ký topic dùng cho ping
+        client.subscribe(PING_TOPIC)
     else:
         print(f"Failed to connect, return code {rc}")
 
-# Xử lý khi nhận được dữ liệu từ MQTT broker
+
 def on_message(client, userdata, msg):
-    # fetch_data_firebase()
     fetch_all_data()
-    global received_data, ping_time, ping_sent_time,student_data, student_from_db, student_id
+    global received_data, ping_time, ping_sent_time, student_data, student_from_db, student_id
     student_id = list(all_student_data.keys())
+
     if msg.topic == PING_TOPIC:
-        # Xử lý phản hồi ping
         if ping_sent_time:
-            latency = (time.time() - ping_sent_time) * 1000  # Tính ping (ms)
+            latency = (time.time() - ping_sent_time) * 1000
             ping_time["latency"] = f"{latency:.2f} ms"
             print(f"Ping: {ping_time['latency']}")
-            ping_sent_time = None  # Reset thời gian gửi ping
+            ping_sent_time = None
     else:
-        # Xử lý dữ liệu thông thường
         RFID = msg.payload.decode()
-        # received_data = RFID
         print(f"Received message: {msg.topic} -> {RFID}")
         student_from_db = get_data_by_id('students', RFID)
         if student_from_db:
             checking_date = datetime.now().strftime('%d-%m-%Y')
+
             student_data = fetch_data_firebase(checking_date, student_from_db['student_id'])
+
+            # Emit sự kiện khi có dữ liệu mới
+            if student_data:
+                socketio.emit('data_update', {
+                    'student_id': student_from_db['student_id'],
+                    'student_name': student_data['student_name'],
+                    'state': student_data['state'],
+                    'date': checking_date
+                })
         compare_data()
 
 def compare_data():
@@ -103,16 +124,13 @@ def compare_data():
             print(message)
         else:
             print("check out")
-
             checkout_time = datetime.now().strftime("%H:%M:%S")
             ref_attendance = db.reference(f"students_attendance/{student_data['date']}".strip())
             data_attendance = ref_attendance.child(f"{student_from_db['student_id']}".strip())
             data_attendance.update({'checkout': f'{checkout_time}'})
-
             message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkout"
             mqtt_client.publish(MQTT_SUB, message)
-            current_date_time = datetime.now()
-
+            print(message)
     else:
         mqtt_client.publish(MQTT_SUB, "0_Unknown")
 
@@ -196,18 +214,21 @@ def fetch_data_by_date(date):
         return data
     except Exception as e:
         return {"error": str(e)}, 500
+
+
 @app.route('/')
 def index():
     return render_template("login.html")
+
+
 @app.route('/login', methods=['POST'])
 def login():
     email = request.form.get("email")
     password = request.form.get("password")
     try:
         admins_ref = db.reference('admin')
-        admins = admins_ref.get()  # Lấy toàn bộ dữ liệu admin
+        admins = admins_ref.get()
 
-        # So sánh email và password
         for admin_id, admin_data in admins.items():
             if admin_data['email'] == email and admin_data['password'] == password:
                 session['user'] = email
@@ -215,6 +236,7 @@ def login():
         return "Invalid email or password", 401
     except Exception as e:
         return f"Error: {str(e)}", 400
+
 
 @app.route('/home_page')
 def home_page():
@@ -226,53 +248,75 @@ def home_page():
     response.headers['Expires'] = '0'
     return response
 
+
 @app.route('/logout')
 def logout():
     session.pop('user', None)
     return redirect(url_for('index'))
+
+
 @app.route('/submit_date', methods=['POST'])
 def submit_date():
     selected_date = request.form['date']
     try:
-        # Chuyển đổi ngày sang định dạng ngày/tháng/năm
         formatted_date = datetime.strptime(selected_date, '%Y-%m-%d').strftime('%d-%m-%Y')
         attendance_data = fetch_data_by_date(formatted_date)
         return jsonify({"date": formatted_date, "attendance": attendance_data})
     except ValueError:
         return jsonify({"error": "Invalid date format"}), 400
+
+
 @app.route('/checkout_all', methods=['POST'])
 def checkout_all():
     checkout_data = request.get_json()
     checkout_date = checkout_data.get('dateCheckout')
     if not checkout_date:
-        return jsonify ({'message': 'No date provided'}), 400
+        return jsonify({'message': 'No date provided'}), 400
+
     formatted_date_checkout = datetime.strptime(checkout_date, '%Y-%m-%d').strftime('%d-%m-%Y')
     checkout_time = datetime.now().strftime('%H:%M:%S')
-    print(f'Checkout date: {formatted_date_checkout}')
+
     ref = db.reference(f'students_attendance/{formatted_date_checkout}')
     data_checkout = ref.get()
-    for key, value in data_checkout.items():
-        if 'checkin' in value and value['checkin']:
-            ref.child(key).update({'state':'1', 'checkout':f'{checkout_time}'})
 
-    print(data_checkout)
+    if data_checkout:
+        checkout_count = 0
+        for key, value in data_checkout.items():
+            # Kiểm tra xem đã điểm danh (state = "1") và chưa checkout
+            if value.get('state') == "1" and not value.get('checkout'):
+                ref.child(key).update({'checkout': f'{checkout_time}'})
+                checkout_count += 1
+
+        # Emit sự kiện sau khi checkout all
+        if checkout_count > 0:
+            socketio.emit('checkout_update', {'success': True})
+            return jsonify({
+                'message': f'Successfully checked out {checkout_count} students',
+                'count': checkout_count
+            })
+        else:
+            return jsonify({
+                'message': 'No students eligible for checkout',
+                'count': 0
+            })
+    return jsonify({'message': 'No data found for the selected date'}), 404
+
 
 if __name__ == "__main__":
-    # Khởi động MQTT client trong luồng riêng
     mqtt_thread = threading.Thread(target=start_mqtt)
     mqtt_thread.daemon = True
     mqtt_thread.start()
 
-    # Khởi động luồng kiểm tra kết nối
     reconnect_thread = threading.Thread(target=ensure_mqtt_connection)
     reconnect_thread.daemon = True
     reconnect_thread.start()
 
-    # Khởi động luồng gửi ping
     ping_thread = threading.Thread(target=send_ping)
     ping_thread.daemon = True
     ping_thread.start()
 
+    firebase_thread = threading.Thread(target=start_firebase_listener)
+    firebase_thread.daemon = True
+    firebase_thread.start()
 
-    # Chạy Flask server
-    app.run(host='127.0.0.1', port=5003 )
+    socketio.run(app, host='127.0.0.1', port=8000, debug=True)
