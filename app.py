@@ -16,7 +16,7 @@ app.secret_key = secrets.token_hex((24))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.123"
+MQTT_BROKER = "192.168.22.209"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -78,8 +78,7 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     fetch_all_data()
-    global received_data, ping_time, ping_sent_time, student_data, student_from_db, student_id
-    student_id = list(all_student_data.keys())
+    global received_data, ping_time, ping_sent_time, student_data, student_from_db
 
     if msg.topic == PING_TOPIC:
         if ping_sent_time:
@@ -93,9 +92,7 @@ def on_message(client, userdata, msg):
         student_from_db = get_data_by_id('students', RFID)
         if student_from_db:
             checking_date = datetime.now().strftime('%d-%m-%Y')
-
             student_data = fetch_data_firebase(checking_date, student_from_db['student_id'])
-
             # Emit sự kiện khi có dữ liệu mới
             if student_data:
                 socketio.emit('data_update', {
@@ -161,15 +158,17 @@ def get_data_by_id(path, cardId):
         results = ref.get()  # Lọc theo điều kiện
 
         if not results:
-            return {"message": "No data found"}, 404
+            def_err = db.reference((f"{path}/00000000").strip())
+            return def_err.get()
         return results
     except Exception as e:
-        return {"error": str(e)}, 500
+        def_err = db.reference((f"{path}/00000000").strip())
+        return def_err.get()
 
 def fetch_data_firebase(checking_date, student_id):
     try:
         ref = db.reference(f'recognized_faces/{checking_date}'.strip())
-        return ref.child(student_id).get()
+        return ref.child(str(student_id).upper()).get()
     except Exception as e:
         return {"error": str(e)}, 500
 
@@ -265,6 +264,36 @@ def submit_date():
     except ValueError:
         return jsonify({"error": "Invalid date format"}), 400
 
+@app.route('/submit_student_data', methods=['POST'])
+def submit_student_data():
+    try:
+        name = request.form.get('name')
+        studentId = request.form.get('studentId')
+        rfid_code = request.form.get('rfidCode')
+
+        if not all([name, studentId, rfid_code]):
+            return jsonify({
+                'status': 'error',
+                'message': 'Vui lòng điền đầy đủ thông tin'
+            }), 400
+
+        student_ref = db.reference('students')
+        student_ref.child(rfid_code).set({
+            'student_name': name,
+            'student_id': studentId,
+            'rfid_code': rfid_code
+        })
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Đã thêm thông tin học sinh thành công'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status' : 'error',
+            'message' : f'Lỗi: {str(e)}'
+        }), 500
 
 @app.route('/checkout_all', methods=['POST'])
 def checkout_all():
