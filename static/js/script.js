@@ -1,6 +1,19 @@
 // Khởi tạo kết nối Socket.IO
 const socket = io();
 
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0'); // Tháng (0-11, cần +1)
+    const day = String(today.getDate()).padStart(2, '0'); // Ngày
+
+    // Định dạng ngày theo chuẩn YYYY-MM-DD
+    const formattedDate = `${year}-${month}-${day}`;
+
+    // Gán giá trị mặc định cho thẻ input type="date"
+    document.getElementById('date').value = formattedDate;
+    console.log(formattedDate);
+
+
 document.getElementById('date-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const dateInput = document.getElementById('date').value;
@@ -170,3 +183,99 @@ function displayResult(data) {
     `;
     document.getElementById('result').innerHTML = html;
 }
+
+//Phần pop-up nhập thông tin
+const studentModal = new bootstrap.Modal(document.getElementById('studentModal'));
+const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+
+function resetForm() {
+    document.getElementById('studentForm').reset();
+    // Xóa các class validation
+    document.querySelectorAll('.form-control').forEach(input => {
+        input.classList.remove('is-invalid');
+    });
+}
+
+// Reset form khi đóng modal
+document.getElementById('studentModal').addEventListener('hidden.bs.modal', function () {
+    resetForm();
+});
+
+function submitForm() {
+    // Validate form
+    let isValid = true;
+    const name = document.getElementById('name');
+    const studentId = document.getElementById('studentId');
+    const rfidCode = document.getElementById('rfidCode');
+
+    // Kiểm tra từng trường
+    if (!name.value.trim()) {
+        name.classList.add('is-invalid');
+        isValid = false;
+    }
+    if (!studentId.value.trim()) {
+        studentId.classList.add('is-invalid');
+        isValid = false;
+    }
+    if (!rfidCode.value.trim()) {
+        rfidCode.classList.add('is-invalid');
+        isValid = false;
+    }
+
+    if (!isValid) return;
+
+    // Hiển thị loading modal
+    studentModal.hide();
+
+    // Gửi dữ liệu
+    const formData = new FormData(document.getElementById('studentForm'));
+    fetch('/submit_student_data', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadingModal.hide();
+        document.querySelector('.modal-backdrop').remove();
+        if (data.status === 'success') {
+            // Hiển thị thông báo thành công
+            Swal.fire({
+                icon: 'success',
+                title: 'Thành công!',
+                timer: 1500,
+                text: data.message,
+                confirmButtonText: 'OK'
+            });
+            resetForm();
+        } else {
+            // Hiển thị thông báo lỗi
+            Swal.fire({
+                icon: 'error',
+                title: 'Lỗi!',
+                timer: 1500,
+                text: data.message,
+                confirmButtonText: 'OK'
+            });
+            studentModal.show();
+        }
+    })
+    .catch(error => {
+        loadingModal.hide();
+        document.querySelector('.modal-backdrop').remove();
+        Swal.fire({
+            icon: 'error',
+            title: 'Lỗi!',
+            timer: 1500,
+            text: 'Có lỗi xảy ra khi gửi dữ liệu!',
+            confirmButtonText: 'OK'
+        });
+        studentModal.show();
+    });
+}
+
+// Xử lý sự kiện input để xóa trạng thái invalid
+document.querySelectorAll('.form-control').forEach(input => {
+    input.addEventListener('input', function() {
+        this.classList.remove('is-invalid');
+    });
+});
