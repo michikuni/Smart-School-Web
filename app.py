@@ -16,7 +16,7 @@ app.secret_key = secrets.token_hex((24))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.76"
+MQTT_BROKER = "192.168.22.123"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -119,7 +119,7 @@ def compare_data():
             ref_recog = db.reference(f"recognized_faces/{student_data['date']}".strip())
             data_recog = ref_recog.child(f"{student_from_db['student_id']}".strip())
             data_recog.update({'state':'1'})
-            message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkin"
+            message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkin_"
             mqtt_client.publish(MQTT_SUB, message)
             print(message)
         else:
@@ -128,7 +128,7 @@ def compare_data():
             ref_attendance = db.reference(f"students_attendance/{student_data['date']}".strip())
             data_attendance = ref_attendance.child(f"{student_from_db['student_id']}".strip())
             data_attendance.update({'checkout': f'{checkout_time}'})
-            message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkout"
+            message = "1_" + student_data['student_name'] + "_" + student_from_db['student_id'] + "_checkout_"
             mqtt_client.publish(MQTT_SUB, message)
             print(message)
     else:
