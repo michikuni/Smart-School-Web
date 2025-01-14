@@ -16,7 +16,7 @@ app.secret_key = secrets.token_hex((24))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.209"
+MQTT_BROKER = "192.168.22.99"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -77,9 +77,18 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg):
-    fetch_all_data()
     global received_data, ping_time, ping_sent_time, student_data, student_from_db
-
+    checking_date = datetime.now().strftime('%d-%m-%Y')
+    all_student_id = str(list(fetch_data_by_date(checking_date).keys()))
+    for key in all_student_id:
+        all_student_data = fetch_data_firebase(checking_date, key)
+        if all_student_data and key:
+            socketio.emit('data_update', {
+                'student_id': key,
+                'student_name': all_student_data['student_name'],
+                'state': all_student_data['state'],
+                'date': checking_date
+            })
     if msg.topic == PING_TOPIC:
         if ping_sent_time:
             latency = (time.time() - ping_sent_time) * 1000
@@ -91,7 +100,6 @@ def on_message(client, userdata, msg):
         print(f"Received message: {msg.topic} -> {RFID}")
         student_from_db = get_data_by_id('students', RFID)
         if student_from_db:
-            checking_date = datetime.now().strftime('%d-%m-%Y')
             student_data = fetch_data_firebase(checking_date, student_from_db['student_id'])
             # Emit sự kiện khi có dữ liệu mới
             if student_data:
@@ -164,7 +172,7 @@ def get_data_by_id(path, cardId):
     except Exception as e:
         def_err = db.reference((f"{path}/00000000").strip())
         return def_err.get()
-
+all_student_data = []
 def fetch_data_firebase(checking_date, student_id):
     try:
         ref = db.reference(f'recognized_faces/{checking_date}'.strip())
@@ -172,14 +180,7 @@ def fetch_data_firebase(checking_date, student_id):
     except Exception as e:
         return {"error": str(e)}, 500
 
-all_student_data = []
-def fetch_all_data():
-    global all_student_data
-    try:
-        ref = db.reference('students_attendance')
-        all_student_data = ref.get()
-    except Exception as e:
-        return {"error": str(e)}, 500
+
 
 # Hàm gửi tin nhắn ping
 def send_ping():
@@ -203,13 +204,13 @@ def start_mqtt():
         print(f"Initial connection failed: {e}")
 
     mqtt_client.loop_start()  # Dùng loop_start() để MQTT chạy trong nền
+
+all_student_id = []
 def fetch_data_by_date(date):
     try:
         # Tham chiếu đến ngày cụ thể
         ref = db.reference(f'students_attendance/{date}')
         data = ref.get()
-        # print(data)
-        # print(date)
         return data
     except Exception as e:
         return {"error": str(e)}, 500
@@ -269,7 +270,7 @@ def submit_student_data():
     try:
         name = request.form.get('name')
         studentId = request.form.get('studentId')
-        rfid_code = request.form.get('rfidCode')
+        rfid_code = request.form.get('rfidCode').upper()
 
         if not all([name, studentId, rfid_code]):
             return jsonify({
