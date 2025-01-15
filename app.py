@@ -16,7 +16,7 @@ app.secret_key = secrets.token_hex((24))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.99"
+MQTT_BROKER = "10.148.146.138"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
@@ -79,16 +79,18 @@ def on_connect(client, userdata, flags, rc):
 def on_message(client, userdata, msg):
     global received_data, ping_time, ping_sent_time, student_data, student_from_db
     checking_date = datetime.now().strftime('%d-%m-%Y')
-    all_student_id = str(list(fetch_data_by_date(checking_date).keys()))
-    for key in all_student_id:
-        all_student_data = fetch_data_firebase(checking_date, key)
-        if all_student_data and key:
-            socketio.emit('data_update', {
-                'student_id': key,
-                'student_name': all_student_data['student_name'],
-                'state': all_student_data['state'],
-                'date': checking_date
-            })
+    data_by_date = fetch_data_by_date(checking_date)
+    if data_by_date:
+        all_student_id = list(data_by_date.keys())
+        for key in all_student_id:
+            all_student_data = fetch_data_firebase(checking_date, key)
+            if all_student_data and key:
+                socketio.emit('data_update', {
+                    'student_id': key,
+                    'student_name': all_student_data['student_name'],
+                    'state': all_student_data['state'],
+                    'date': checking_date
+                })
     if msg.topic == PING_TOPIC:
         if ping_sent_time:
             latency = (time.time() - ping_sent_time) * 1000
