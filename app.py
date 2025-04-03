@@ -16,7 +16,7 @@ app.secret_key = secrets.token_hex((24))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cấu hình MQTT
-MQTT_BROKER = "192.168.22.76"
+MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 MQTT_TOPIC = "home/test"
 MQTT_SUB = "home/sub"
